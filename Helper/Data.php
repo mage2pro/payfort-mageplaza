@@ -4,8 +4,15 @@
  * See COPYING.txt for license details.
  */
 namespace Payfort\Fort\Helper;
-use Magento\Sales\Model\Order;
+use Magento\Framework\App\ObjectManager as OM;
+use Magento\Framework\DB\Transaction;
+use Magento\Framework\Exception\LocalizedException as LE;
+use Magento\Framework\Registry;
 use Magento\Sales\Api\OrderManagementInterface;
+use Magento\Sales\Model\Order;
+use Magento\Sales\Model\Order\Email\Sender\InvoiceSender;
+use Magento\Sales\Model\Order\Invoice;
+use Magento\Sales\Model\Service\InvoiceService;
 /**
  * Payment module base helper
  */
@@ -205,6 +212,15 @@ class Data extends \Magento\Payment\Helper\Data
             'access_code'           => $this->getMainConfigData('access_code'),
             'command'               => $this->getMainConfigData('command'),
             'merchant_identifier'   => $this->getMainConfigData('merchant_identifier'),
+			/**
+			 * 2018-02-09
+			 * «It holds the customer’s IP address.
+			 * It’s Mandatory, if the fraud service is active.
+			 * We support IPv4 and IPv6 as shown in the example below.»
+			 * Alphanumeric, Mandatory, Max: 45.
+			 * Special characters: «.:».
+			 * https://docs.payfort.com/docs/redirection/build/index.html#authorization-purchase-request
+			 */
             'customer_ip'           => $ip,
             'amount'                => $amount,
             'currency'              => strtoupper($currency),
@@ -441,21 +457,43 @@ class Data extends \Magento\Payment\Helper\Data
         }
         return false;
     }
-    
-    public function processOrder($order) {
-     
-        if ($order->getState() != $order::STATE_PROCESSING) {
-            $order->setStatus($order::STATE_PROCESSING);
-            $order->setState($order::STATE_PROCESSING);
-            //$order->setExtOrderId($orderNumber);
-            $order->save();
-            $customerNotified = $this->sendOrderEmail($order);
-            $order->addStatusToHistory( $order::STATE_PROCESSING , 'Payfort_Fort :: Order has been paid.', $customerNotified );
-            $order->save();
-            return true;
-        }
-        return false;
+
+	/**
+	 * 2018-02-09
+	 * @param Order $o
+	 * @throws \Exception
+	 */
+    public function processOrder(Order $o) {
+		if ($o->canInvoice()) {
+			$o->setCustomerNoteNotify(true)->setIsInProcess(true);
+			$t = OM::getInstance()->create(Transaction::class); /** @var Transaction $t */
+			$t->addObject($i = $this->invoice($o))->addObject($o)->save(); /** @var Invoice $i */
+			$is = OM::getInstance()->get(InvoiceSender::class); /** @var InvoiceSender $is */
+			$is->send($i);
+		}
     }
+
+	/**
+	 * 2018-12-09
+	 * @param Order $o
+	 * @return Invoice
+	 * @throws LE
+	 */
+	private function invoice(Order $o) {
+		$invoiceService = OM::getInstance()->get(InvoiceService::class); /** @var InvoiceService $invoiceService */
+		/** @var Invoice $result */
+		if (!($result = $invoiceService->prepareInvoice($o))) {
+			throw new LE(__('We can\'t save the invoice right now.'));
+		}
+		if (!$result->getTotalQty()) {
+			throw new LE(__('You can\'t create an invoice without products.'));
+		}
+		$registry = OM::getInstance()->get(Registry::class); /** @var Registry $registry */
+		$registry->register('current_invoice', $result);
+		$result->setRequestedCaptureCase(Invoice::CAPTURE_ONLINE);
+		$result->register();
+		return $result;
+	}
     
     public function sendOrderEmail($order) {
         $result = true;
