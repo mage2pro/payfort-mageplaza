@@ -106,6 +106,13 @@ class Data extends \Magento\Payment\Helper\Data
             'currency'            => strtoupper($currency),
             'merchant_identifier' => $this->getMainConfigData('merchant_identifier'),
             'access_code'         => $this->getMainConfigData('access_code'),
+			/**
+			 * 2018-02-09
+			 * «The Merchant’s unique order number»
+			 * Alphanumeric, Mandatory, Max: 40.
+			 * Special characters: «-_.».
+			 * https://docs.payfort.com/docs/redirection/build/index.html#authorization-purchase-request
+			 */
             'merchant_reference'  => $orderId,
             'customer_email'      => trim( $order->getCustomerEmail() ),
             'command'             => $this->getMainConfigData('command'),
@@ -144,6 +151,13 @@ class Data extends \Magento\Payment\Helper\Data
             $gatewayParams = array(
                 'merchant_identifier' => $this->getMainConfigData('merchant_identifier'),
                 'access_code'         => $this->getMainConfigData('access_code'),
+				/**
+				 * 2018-02-09
+				 * «The Merchant’s unique order number»
+				 * Alphanumeric, Mandatory, Max: 40.
+				 * Special characters: «-_.».
+				 * https://docs.payfort.com/docs/redirection/build/index.html#authorization-purchase-request
+				 */
                 'merchant_reference'  => $orderId,
                 'service_command'     => 'TOKENIZATION',
                 'language'            => $language,
@@ -180,6 +194,13 @@ class Data extends \Magento\Payment\Helper\Data
         $currency = $order->getOrderCurrency()->getCurrencyCode();
         $amount = $this->convertFortAmount($order->getGrandTotal(), $currency);
         $postData = array(
+			/**
+			 * 2018-02-09
+			 * «The Merchant’s unique order number»
+			 * Alphanumeric, Mandatory, Max: 40.
+			 * Special characters: «-_.».
+			 * https://docs.payfort.com/docs/redirection/build/index.html#authorization-purchase-request
+			 */
             'merchant_reference'    => $orderId,
             'access_code'           => $this->getMainConfigData('access_code'),
             'command'               => $this->getMainConfigData('command'),
