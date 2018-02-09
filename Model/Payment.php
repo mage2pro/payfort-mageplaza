@@ -87,7 +87,9 @@ class Payment extends \Magento\Payment\Model\Method\AbstractMethod
         $this->_minAmount = $this->getConfigData('min_order_total');
         $this->_maxAmount = $this->getConfigData('max_order_total');
     }
-    
+
+    function canCapture() {return true;}
+
     public function setMethodCode($code) {
         $this->_code = $code;
     }

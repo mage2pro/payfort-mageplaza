@@ -5,14 +5,13 @@
  */
 namespace Payfort\Fort\Helper;
 use Magento\Framework\App\ObjectManager as OM;
-use Magento\Framework\DB\Transaction;
-use Magento\Framework\Exception\LocalizedException as LE;
-use Magento\Framework\Registry;
+use Magento\Sales\Api\Data\OrderStatusHistoryInterface as IHistory;
 use Magento\Sales\Api\OrderManagementInterface;
 use Magento\Sales\Model\Order;
-use Magento\Sales\Model\Order\Email\Sender\InvoiceSender;
-use Magento\Sales\Model\Order\Invoice;
-use Magento\Sales\Model\Service\InvoiceService;
+use Magento\Sales\Model\Order\Email\Sender\OrderSender;
+use Magento\Sales\Model\Order\Payment as OP;
+use Magento\Sales\Model\Order\Status\History;
+use Magento\Sales\Model\Order\Config as OrderConfig;
 /**
  * Payment module base helper
  */
@@ -464,36 +463,66 @@ class Data extends \Magento\Payment\Helper\Data
 	 * @throws \Exception
 	 */
     public function processOrder(Order $o) {
-		if ($o->canInvoice()) {
-			$o->setCustomerNoteNotify(true)->setIsInProcess(true);
-			$t = OM::getInstance()->create(Transaction::class); /** @var Transaction $t */
-			$t->addObject($i = $this->invoice($o))->addObject($o)->save(); /** @var Invoice $i */
-			$is = OM::getInstance()->get(InvoiceSender::class); /** @var InvoiceSender $is */
-			$is->send($i);
+    	$op = $o->getPayment(); /** @var OP $op */
+		if ($o->getTotalDue()) {
+			$op->setIsTransactionClosed(true);
+			$totalDue = $o->getTotalDue();
+			$baseTotalDue = $o->getBaseTotalDue();
+			$op->setAmountAuthorized($totalDue);
+			$op->setBaseAmountAuthorized($baseTotalDue);
+			$op->capture(null);
+			$orderConfig = OM::getInstance()->get(OrderConfig::class); /** @var OrderConfig $orderConfig */
+			$this->updateOrder(
+				$o
+				,Order::STATE_PROCESSING
+				,$orderConfig->getStateDefaultStatus(Order::STATE_PROCESSING)
+				,true
+			);
+			$o->save();
+			/** @var OrderSender $os */
+			$os = OM::getInstance()->get(OrderSender::class);
+			$os->send($o);
+			/** @var History|IHistory $h */
+			$h = $o->addStatusHistoryComment(__('You have confirmed the order to the customer via email.'));
+			$h->setIsVisibleOnFront(false);
+			$h->setIsCustomerNotified(true);
+			$h->save();
 		}
     }
 
-	/**
-	 * 2018-12-09
-	 * @param Order $o
-	 * @return Invoice
-	 * @throws LE
-	 */
-	private function invoice(Order $o) {
-		$invoiceService = OM::getInstance()->get(InvoiceService::class); /** @var InvoiceService $invoiceService */
-		/** @var Invoice $result */
-		if (!($result = $invoiceService->prepareInvoice($o))) {
-			throw new LE(__('We can\'t save the invoice right now.'));
-		}
-		if (!$result->getTotalQty()) {
-			throw new LE(__('You can\'t create an invoice without products.'));
-		}
-		$registry = OM::getInstance()->get(Registry::class); /** @var Registry $registry */
-		$registry->register('current_invoice', $result);
-		$result->setRequestedCaptureCase(Invoice::CAPTURE_ONLINE);
-		$result->register();
-		return $result;
-	}
+    /**
+     * Set appropriate state to order or add status to order history
+     *
+     * @param Order $order
+     * @param string $orderState
+     * @param string $orderStatus
+     * @param bool $isCustomerNotified
+     * @return void
+     */
+    private function updateOrder(Order $order, $orderState, $orderStatus, $isCustomerNotified)
+    {
+        // add message if order was put into review during authorization or capture
+        $message = $order->getCustomerNote();
+        $originalOrderState = $order->getState();
+        $originalOrderStatus = $order->getStatus();
+
+        switch (true) {
+            case ($message && ($originalOrderState == Order::STATE_PAYMENT_REVIEW)):
+                $order->addStatusToHistory($originalOrderStatus, $message, $isCustomerNotified);
+                break;
+            case ($message):
+            case ($originalOrderState && $message):
+            case ($originalOrderState != $orderState):
+            case ($originalOrderStatus != $orderStatus):
+                $order->setState($orderState)
+                    ->setStatus($orderStatus)
+                    ->addStatusHistoryComment($message)
+                    ->setIsCustomerNotified($isCustomerNotified);
+                break;
+            default:
+                break;
+        }
+    }
     
     public function sendOrderEmail($order) {
         $result = true;
