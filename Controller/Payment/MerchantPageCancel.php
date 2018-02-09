@@ -15,5 +15,3 @@ class MerchantPageCancel extends \Payfort\Fort\Controller\Checkout
         $this->getResponse()->setRedirect($returnUrl);
     }
 }
-
-?>
